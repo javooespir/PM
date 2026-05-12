@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Filter, SortAsc, Clock, AlertTriangle, CheckSquare } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -27,7 +27,6 @@ export function Tasks() {
   const [tasks, setTasks] = useState([])
   const [milestones, setMilestones] = useState([])
   const [suppliers, setSuppliers] = useState([])
-  const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
@@ -37,39 +36,32 @@ export function Tasks() {
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
     const pid = currentProject.id
-    const [t, m, s, p] = await Promise.all([
-      supabase.from('tasks').select('*').eq('project_id', pid).order('score', { ascending: false }),
-      supabase.from('milestones').select('id,name').eq('project_id', pid),
-      supabase.from('suppliers').select('id,name').eq('project_id', pid),
-      supabase.from('profiles').select('id,full_name'),
-    ])
-    setTasks(t.data || [])
-    setMilestones(m.data || [])
-    setSuppliers(s.data || [])
-    setProfiles(p.data || [])
+    setTasks(db.tasks.list({ project_id: pid }).sort((a, b) => (b.score || 0) - (a.score || 0)))
+    setMilestones(db.milestones.list({ project_id: pid }))
+    setSuppliers(db.suppliers.list({ project_id: pid }))
     setLoading(false)
   }
 
-  async function handleSave(formData) {
+  function handleSave(formData) {
     setSaving(true)
     const payload = { ...formData, project_id: currentProject.id }
     if (editTask) {
-      const { data } = await supabase.from('tasks').update(payload).eq('id', editTask.id).select().single()
+      const data = db.tasks.update(editTask.id, payload)
       if (data) setTasks((prev) => prev.map((t) => t.id === data.id ? data : t).sort((a, b) => (b.score || 0) - (a.score || 0)))
     } else {
-      const { data } = await supabase.from('tasks').insert(payload).select().single()
-      if (data) setTasks((prev) => [data, ...prev])
+      const data = db.tasks.create(payload)
+      setTasks((prev) => [data, ...prev])
     }
     setSaving(false)
     setModalOpen(false)
     setEditTask(null)
   }
 
-  async function handleStatusChange(taskId, newStatus) {
-    const { data } = await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId).select().single()
+  function handleStatusChange(taskId, newStatus) {
+    const data = db.tasks.update(taskId, { status: newStatus })
     if (data) setTasks((prev) => prev.map((t) => t.id === data.id ? data : t))
   }
 
@@ -154,7 +146,7 @@ export function Tasks() {
                 </Td>
                 <Td>
                   <span className="text-sm text-dark-300">
-                    {profiles.find((p) => p.id === task.owner_id)?.full_name || '—'}
+                    {task.owner || '—'}
                   </span>
                 </Td>
                 <Td><PriorityBadge priority={task.priority} /></Td>
@@ -205,7 +197,6 @@ export function Tasks() {
           initial={editTask || {}}
           milestones={milestones}
           suppliers={suppliers}
-          profiles={profiles}
           onSubmit={handleSave}
           onCancel={() => { setModalOpen(false); setEditTask(null) }}
           loading={saving}

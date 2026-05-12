@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, LineChart, Line,
 } from 'recharts'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -27,23 +27,15 @@ export function Reports() {
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
     const pid = currentProject.id
-    const [tasksRes, risksRes, msRes, supplRes, escRes, docsRes] = await Promise.all([
-      supabase.from('tasks').select('*').eq('project_id', pid),
-      supabase.from('risks').select('*').eq('project_id', pid),
-      supabase.from('milestones').select('*').eq('project_id', pid).order('planned_date'),
-      supabase.from('suppliers').select('*').eq('project_id', pid),
-      supabase.from('escalations').select('*').eq('project_id', pid),
-      supabase.from('documents').select('id').eq('project_id', pid),
-    ])
 
-    const tasks = tasksRes.data || []
-    const risks = risksRes.data || []
-    const milestones = msRes.data || []
-    const suppliers = supplRes.data || []
-    const escalations = escRes.data || []
+    const tasks = db.tasks.list({ project_id: pid })
+    const risks = db.risks.list({ project_id: pid })
+    const milestones = db.milestones.list({ project_id: pid }).sort((a, b) => new Date(a.planned_date) - new Date(b.planned_date))
+    const suppliers = db.suppliers.list({ project_id: pid })
+    const escalations = db.escalations.list({ project_id: pid })
 
     // Task by status
     const taskByStatus = ['not_started','in_progress','blocked','completed','cancelled'].map((s) => ({
@@ -77,7 +69,7 @@ export function Reports() {
     const topRisks = risks.filter((r) => r.status !== 'closed').sort((a, b) => b.rpn - a.rpn).slice(0, 10)
     const openEscalations = escalations.filter((e) => e.status !== 'resolved')
 
-    setData({ tasks, risks, milestones, suppliers, escalations, overdueTasks, topRisks, openEscalations, taskByStatus, taskByPriority, riskByCategory, msHealth, docs: docsRes.data || [] })
+    setData({ tasks, risks, milestones, suppliers, escalations, overdueTasks, topRisks, openEscalations, taskByStatus, taskByPriority, riskByCategory, msHealth })
     setLoading(false)
   }
 

@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { Input, Select, Textarea, FormRow } from '../shared/Input'
 import { Button } from '../shared/Button'
 
-export function TaskForm({ initial = {}, milestones = [], suppliers = [], profiles = [], onSubmit, onCancel, loading }) {
+export function TaskForm({ initial = {}, milestones = [], suppliers = [], onSubmit, onCancel, loading }) {
   const [form, setForm] = useState({
     title: initial.title || '',
     description: initial.description || '',
     area: initial.area || '',
-    owner_id: initial.owner_id || '',
+    owner: initial.owner || '',
     priority: initial.priority || 'medium',
     status: initial.status || 'not_started',
     due_date: initial.due_date || '',
@@ -47,10 +47,7 @@ export function TaskForm({ initial = {}, milestones = [], suppliers = [], profil
       </FormRow>
 
       <FormRow cols={2}>
-        <Select label="Owner" value={form.owner_id} onChange={(e) => set('owner_id', e.target.value)}>
-          <option value="">No owner</option>
-          {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </Select>
+        <Input label="Owner" value={form.owner} onChange={(e) => set('owner', e.target.value)} placeholder="Name of task owner" />
         <Input label="Area / Department" value={form.area} onChange={(e) => set('area', e.target.value)} placeholder="Engineering, Quality, Tooling..." />
       </FormRow>
 

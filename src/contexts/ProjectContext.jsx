@@ -1,45 +1,49 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useAppStore } from '../lib/store'
+import { useAuth } from './AuthContext'
 
 const ProjectContext = createContext(null)
 
 export function ProjectProvider({ children }) {
   const { currentProject, setCurrentProject, setProjects } = useAppStore()
+  const { auth } = useAuth()
   const [localProjects, setLocalProjects] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadProjects()
-  }, [])
+  }, [auth])
 
   async function loadProjects() {
     setLoading(true)
-    const { data } = await supabase.from('projects').select('*').order('created_at', { ascending: false })
-    if (data) {
-      setLocalProjects(data)
-      setProjects(data)
-      if (!currentProject && data.length > 0) setCurrentProject(data[0])
+    if (auth) {
+      try { await db.syncAllFromGitHub() } catch { /* use local cache */ }
     }
+    const data = db.projects.list()
+    setLocalProjects(data)
+    setProjects(data)
+    if (!currentProject && data.length > 0) setCurrentProject(data[0])
     setLoading(false)
   }
 
-  async function createProject(projectData) {
-    const { data, error } = await supabase.from('projects').insert(projectData).select().single()
-    if (!error) {
-      setLocalProjects((prev) => [data, ...prev])
-      setCurrentProject(data)
-    }
-    return { data, error }
+  function createProject(projectData) {
+    const data = db.projects.create(projectData)
+    const next = [data, ...localProjects]
+    setLocalProjects(next)
+    setProjects(next)
+    setCurrentProject(data)
+    return { data, error: null }
   }
 
-  async function updateProject(id, updates) {
-    const { data, error } = await supabase.from('projects').update(updates).eq('id', id).select().single()
-    if (!error) {
-      setLocalProjects((prev) => prev.map((p) => (p.id === id ? data : p)))
-      if (currentProject?.id === id) setCurrentProject(data)
-    }
-    return { data, error }
+  function updateProject(id, updates) {
+    const data = db.projects.update(id, updates)
+    if (!data) return { data: null, error: { message: 'Project not found' } }
+    const next = localProjects.map((p) => (p.id === id ? data : p))
+    setLocalProjects(next)
+    setProjects(next)
+    if (currentProject?.id === id) setCurrentProject(data)
+    return { data, error: null }
   }
 
   return (

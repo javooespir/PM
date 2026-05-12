@@ -1,8 +1,32 @@
-import { useState } from 'react'
-import { Search, Bell, LogOut, User, ChevronDown } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Search, Bell, LogOut, ChevronDown, Cloud, CloudOff, RefreshCw } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useProject } from '../../contexts/ProjectContext'
+import { db, onSyncStatus, getSyncStatus } from '../../lib/db'
 import clsx from 'clsx'
+
+function SyncIndicator() {
+  const [status, setStatus] = useState(getSyncStatus())
+
+  useEffect(() => onSyncStatus(setStatus), [])
+
+  if (status === 'idle') return null
+
+  return (
+    <div className={clsx('flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg', {
+      'text-dark-400': status === 'syncing',
+      'text-success-400 bg-success-500/10': status === 'ok',
+      'text-danger-400 bg-danger-500/10': status === 'error',
+    })}>
+      {status === 'syncing' && <RefreshCw className="w-3 h-3 animate-spin" />}
+      {status === 'ok' && <Cloud className="w-3 h-3" />}
+      {status === 'error' && <CloudOff className="w-3 h-3" />}
+      <span className="hidden sm:inline">
+        {status === 'syncing' ? 'Syncing...' : status === 'ok' ? 'Saved' : 'Sync error'}
+      </span>
+    </div>
+  )
+}
 
 export function Topbar() {
   const { profile, signOut } = useAuth()
@@ -26,10 +50,12 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-2 ml-auto">
+        {/* Sync status */}
+        <SyncIndicator />
+
         {/* Notifications placeholder */}
         <button className="relative p-2 rounded-lg hover:bg-dark-800 text-dark-400 hover:text-dark-200 transition-colors">
           <Bell className="w-4 h-4" />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-danger-500 rounded-full" />
         </button>
 
         {/* User menu */}
@@ -45,7 +71,7 @@ export function Topbar() {
             </div>
             <div className="hidden sm:block text-left">
               <p className="text-xs font-medium text-dark-200 leading-none">{profile?.full_name || 'User'}</p>
-              <p className="text-xs text-dark-500 mt-0.5">{profile?.role || 'PM'}</p>
+              <p className="text-xs text-dark-500 mt-0.5">{profile?.area || 'GitHub'}</p>
             </div>
             <ChevronDown className="w-3 h-3 text-dark-500" />
           </button>
@@ -54,7 +80,7 @@ export function Topbar() {
             <div className="absolute right-0 top-full mt-1 w-52 bg-dark-900 border border-dark-700 rounded-xl shadow-2xl z-50 overflow-hidden">
               <div className="px-3 py-2 border-b border-dark-800">
                 <p className="text-sm font-medium text-white">{profile?.full_name}</p>
-                <p className="text-xs text-dark-500">{profile?.email}</p>
+                <p className="text-xs text-dark-500">{profile?.area}</p>
               </div>
               <button
                 onClick={() => { signOut(); setUserMenuOpen(false) }}

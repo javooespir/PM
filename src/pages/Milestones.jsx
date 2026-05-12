@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Milestone as MilestoneIcon } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -14,7 +14,7 @@ import clsx from 'clsx'
 
 const MILESTONE_TYPES = ['SOP','EVT','DVT','PVT','LVPT','Tooling','PPAP','Certification','Validation','Custom']
 
-function MilestoneForm({ initial = {}, profiles = [], onSubmit, onCancel, loading }) {
+function MilestoneForm({ initial = {}, onSubmit, onCancel, loading }) {
   const [form, setForm] = useState({
     name: initial.name || '',
     code: initial.code || '',
@@ -25,7 +25,7 @@ function MilestoneForm({ initial = {}, profiles = [], onSubmit, onCancel, loadin
     status: initial.status || 'not_started',
     health: initial.health || 'green',
     completion_pct: initial.completion_pct || 0,
-    owner_id: initial.owner_id || '',
+    owner: initial.owner || '',
   })
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
@@ -63,10 +63,7 @@ function MilestoneForm({ initial = {}, profiles = [], onSubmit, onCancel, loadin
           <option value="delayed">Delayed</option>
           <option value="completed">Completed</option>
         </Select>
-        <Select label="Owner" value={form.owner_id} onChange={(e) => set('owner_id', e.target.value)}>
-          <option value="">No owner</option>
-          {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </Select>
+        <Input label="Owner" value={form.owner} onChange={(e) => set('owner', e.target.value)} placeholder="Milestone owner name" />
       </FormRow>
 
       <div>
@@ -88,7 +85,6 @@ export function Milestones() {
   const { currentProject } = useProject()
   const [milestones, setMilestones] = useState([])
   const [tasks, setTasks] = useState([])
-  const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editMs, setEditMs] = useState(null)
@@ -96,28 +92,22 @@ export function Milestones() {
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
-    const [m, t, p] = await Promise.all([
-      supabase.from('milestones').select('*').eq('project_id', currentProject.id).order('planned_date'),
-      supabase.from('tasks').select('id,milestone_id,status,due_date').eq('project_id', currentProject.id),
-      supabase.from('profiles').select('id,full_name'),
-    ])
-    setMilestones(m.data || [])
-    setTasks(t.data || [])
-    setProfiles(p.data || [])
+    setMilestones(db.milestones.list({ project_id: currentProject.id }).sort((a, b) => new Date(a.planned_date) - new Date(b.planned_date)))
+    setTasks(db.tasks.list({ project_id: currentProject.id }))
     setLoading(false)
   }
 
-  async function handleSave(formData) {
+  function handleSave(formData) {
     setSaving(true)
     const payload = { ...formData, project_id: currentProject.id }
     if (editMs) {
-      const { data } = await supabase.from('milestones').update(payload).eq('id', editMs.id).select().single()
+      const data = db.milestones.update(editMs.id, payload)
       if (data) setMilestones((prev) => prev.map((m) => m.id === data.id ? data : m))
     } else {
-      const { data } = await supabase.from('milestones').insert(payload).select().single()
-      if (data) setMilestones((prev) => [...prev, data].sort((a, b) => new Date(a.planned_date) - new Date(b.planned_date)))
+      const data = db.milestones.create(payload)
+      setMilestones((prev) => [...prev, data].sort((a, b) => new Date(a.planned_date) - new Date(b.planned_date)))
     }
     setSaving(false)
     setModalOpen(false)
@@ -251,9 +241,9 @@ export function Milestones() {
                 </div>
               </div>
 
-              {profiles.find((p) => p.id === m.owner_id) && (
+              {m.owner && (
                 <p className="text-xs text-dark-500 mt-2 pt-2 border-t border-dark-800">
-                  Owner: {profiles.find((p) => p.id === m.owner_id)?.full_name}
+                  Owner: {m.owner}
                 </p>
               )}
             </div>
@@ -270,7 +260,6 @@ export function Milestones() {
       <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditMs(null) }} title={editMs ? 'Edit Milestone' : 'New Milestone'} size="md">
         <MilestoneForm
           initial={editMs || {}}
-          profiles={profiles}
           onSubmit={handleSave}
           onCancel={() => { setModalOpen(false); setEditMs(null) }}
           loading={saving}

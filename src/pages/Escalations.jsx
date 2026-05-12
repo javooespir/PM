@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Zap, AlertTriangle, CheckCircle } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -13,14 +13,14 @@ import { KPICard, Card, CardHeader, CardTitle } from '../components/shared/Card'
 import { fmtDate, isOverdue } from '../utils/format'
 import clsx from 'clsx'
 
-function EscalationForm({ initial = {}, tasks = [], risks = [], suppliers = [], milestones = [], profiles = [], onSubmit, onCancel, loading }) {
+function EscalationForm({ initial = {}, tasks = [], risks = [], suppliers = [], milestones = [], onSubmit, onCancel, loading }) {
   const [form, setForm] = useState({
     title: initial.title || '',
     description: initial.description || '',
     trigger_reason: initial.trigger_reason || '',
     severity: initial.severity || 'high',
     status: initial.status || 'open',
-    owner_id: initial.owner_id || '',
+    owner: initial.owner || '',
     escalated_to: initial.escalated_to || '',
     due_date: initial.due_date || '',
     task_id: initial.task_id || '',
@@ -53,14 +53,8 @@ function EscalationForm({ initial = {}, tasks = [], risks = [], suppliers = [], 
       </FormRow>
 
       <FormRow cols={2}>
-        <Select label="Owner" value={form.owner_id} onChange={(e) => set('owner_id', e.target.value)}>
-          <option value="">No owner</option>
-          {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </Select>
-        <Select label="Escalated To" value={form.escalated_to} onChange={(e) => set('escalated_to', e.target.value)}>
-          <option value="">Select person</option>
-          {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </Select>
+        <Input label="Owner" value={form.owner} onChange={(e) => set('owner', e.target.value)} placeholder="Owner name" />
+        <Input label="Escalated To" value={form.escalated_to} onChange={(e) => set('escalated_to', e.target.value)} placeholder="Person name" />
       </FormRow>
 
       <Input label="Due Date" type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} />
@@ -109,7 +103,6 @@ export function Escalations() {
   const [risks, setRisks] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [milestones, setMilestones] = useState([])
-  const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editEsc, setEditEsc] = useState(null)
@@ -118,43 +111,34 @@ export function Escalations() {
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
     const pid = currentProject.id
-    const [e, t, r, s, m, p] = await Promise.all([
-      supabase.from('escalations').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
-      supabase.from('tasks').select('id,title').eq('project_id', pid),
-      supabase.from('risks').select('id,title').eq('project_id', pid),
-      supabase.from('suppliers').select('id,name').eq('project_id', pid),
-      supabase.from('milestones').select('id,name').eq('project_id', pid),
-      supabase.from('profiles').select('id,full_name'),
-    ])
-    setEscalations(e.data || [])
-    setTasks(t.data || [])
-    setRisks(r.data || [])
-    setSuppliers(s.data || [])
-    setMilestones(m.data || [])
-    setProfiles(p.data || [])
+    setEscalations(db.escalations.list({ project_id: pid }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)))
+    setTasks(db.tasks.list({ project_id: pid }))
+    setRisks(db.risks.list({ project_id: pid }))
+    setSuppliers(db.suppliers.list({ project_id: pid }))
+    setMilestones(db.milestones.list({ project_id: pid }))
     setLoading(false)
   }
 
-  async function handleSave(formData) {
+  function handleSave(formData) {
     setSaving(true)
     const payload = { ...formData, project_id: currentProject.id }
     if (editEsc) {
-      const { data } = await supabase.from('escalations').update(payload).eq('id', editEsc.id).select().single()
+      const data = db.escalations.update(editEsc.id, payload)
       if (data) setEscalations((prev) => prev.map((e) => e.id === data.id ? data : e))
     } else {
-      const { data } = await supabase.from('escalations').insert(payload).select().single()
-      if (data) setEscalations((prev) => [data, ...prev])
+      const data = db.escalations.create(payload)
+      setEscalations((prev) => [data, ...prev])
     }
     setSaving(false)
     setModalOpen(false)
     setEditEsc(null)
   }
 
-  async function quickResolve(esc) {
-    const { data } = await supabase.from('escalations').update({ status: 'resolved', resolved_date: new Date().toISOString() }).eq('id', esc.id).select().single()
+  function quickResolve(esc) {
+    const data = db.escalations.update(esc.id, { status: 'resolved', resolved_date: new Date().toISOString() })
     if (data) setEscalations((prev) => prev.map((e) => e.id === data.id ? data : e))
   }
 
@@ -236,8 +220,8 @@ export function Escalations() {
                 )}
 
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-dark-500">
-                  {esc.owner_id && <span>Owner: {profiles.find((p) => p.id === esc.owner_id)?.full_name}</span>}
-                  {esc.escalated_to && <span>To: {profiles.find((p) => p.id === esc.escalated_to)?.full_name}</span>}
+                  {esc.owner && <span>Owner: {esc.owner}</span>}
+                  {esc.escalated_to && <span>To: {esc.escalated_to}</span>}
                   {esc.due_date && <span>Due: {fmtDate(esc.due_date)}</span>}
                   <span>Created: {fmtDate(esc.created_at)}</span>
                 </div>
@@ -273,7 +257,7 @@ export function Escalations() {
       <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditEsc(null) }} title={editEsc ? 'Edit Escalation' : 'New Escalation'} size="md">
         <EscalationForm
           initial={editEsc || {}}
-          tasks={tasks} risks={risks} suppliers={suppliers} milestones={milestones} profiles={profiles}
+          tasks={tasks} risks={risks} suppliers={suppliers} milestones={milestones}
           onSubmit={handleSave}
           onCancel={() => { setModalOpen(false); setEditEsc(null) }}
           loading={saving}

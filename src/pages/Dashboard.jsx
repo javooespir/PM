@@ -8,7 +8,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell,
 } from 'recharts'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { KPICard, Card, CardHeader, CardTitle } from '../components/shared/Card'
 import { StatusBadge, PriorityBadge, HealthIndicator } from '../components/shared/Badge'
@@ -28,23 +28,15 @@ export function Dashboard() {
     if (currentProject) fetchDashboardData()
   }, [currentProject?.id])
 
-  async function fetchDashboardData() {
+  function fetchDashboardData() {
     setLoading(true)
     const pid = currentProject.id
 
-    const [tasksRes, risksRes, milestonesRes, suppliersRes, escalationsRes] = await Promise.all([
-      supabase.from('tasks').select('*').eq('project_id', pid),
-      supabase.from('risks').select('*').eq('project_id', pid),
-      supabase.from('milestones').select('*').eq('project_id', pid).order('planned_date'),
-      supabase.from('suppliers').select('*').eq('project_id', pid),
-      supabase.from('escalations').select('*').eq('project_id', pid).neq('status', 'resolved'),
-    ])
-
-    const tasks = tasksRes.data || []
-    const risks = risksRes.data || []
-    const milestones = milestonesRes.data || []
-    const suppliers = suppliersRes.data || []
-    const escalations = escalationsRes.data || []
+    const tasks = db.tasks.list({ project_id: pid })
+    const risks = db.risks.list({ project_id: pid })
+    const milestones = db.milestones.list({ project_id: pid }).sort((a, b) => new Date(a.planned_date) - new Date(b.planned_date))
+    const suppliers = db.suppliers.list({ project_id: pid })
+    const escalations = db.escalations.list({ project_id: pid }).filter((e) => e.status !== 'resolved')
 
     const openTasks = tasks.filter((t) => !['completed', 'cancelled'].includes(t.status))
     const overdueTasks = openTasks.filter((t) => isOverdue(t.due_date))
@@ -81,6 +73,10 @@ export function Dashboard() {
     })
     setLoading(false)
   }
+
+  useEffect(() => {
+    if (currentProject) fetchDashboardData()
+  }, [currentProject?.id])
 
   if (!currentProject) {
     return (

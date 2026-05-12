@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Plus, AlertTriangle, TrendingUp } from 'lucide-react'
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -15,7 +15,7 @@ import { fmtDate } from '../utils/format'
 import { getRPNSeverity } from '../utils/scoring'
 import clsx from 'clsx'
 
-function RiskForm({ initial = {}, milestones = [], suppliers = [], profiles = [], onSubmit, onCancel, loading }) {
+function RiskForm({ initial = {}, milestones = [], suppliers = [], onSubmit, onCancel, loading }) {
   const [form, setForm] = useState({
     title: initial.title || '',
     description: initial.description || '',
@@ -99,10 +99,7 @@ function RiskForm({ initial = {}, milestones = [], suppliers = [], profiles = []
       <Input label="Trigger Condition" value={form.trigger_condition} onChange={(e) => set('trigger_condition', e.target.value)} placeholder="What event activates this contingency?" />
 
       <FormRow cols={2}>
-        <Select label="Owner" value={form.owner_id} onChange={(e) => set('owner_id', e.target.value)}>
-          <option value="">No owner</option>
-          {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </Select>
+        <Input label="Owner" value={form.owner || ''} onChange={(e) => set('owner', e.target.value)} placeholder="Risk owner name" />
         <Input label="Review Date" type="date" value={form.review_date} onChange={(e) => set('review_date', e.target.value)} />
       </FormRow>
 
@@ -137,7 +134,6 @@ export function Risks() {
   const [risks, setRisks] = useState([])
   const [milestones, setMilestones] = useState([])
   const [suppliers, setSuppliers] = useState([])
-  const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
@@ -146,31 +142,24 @@ export function Risks() {
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
     const pid = currentProject.id
-    const [r, m, s, p] = await Promise.all([
-      supabase.from('risks').select('*').eq('project_id', pid).order('rpn', { ascending: false }),
-      supabase.from('milestones').select('id,name').eq('project_id', pid),
-      supabase.from('suppliers').select('id,name').eq('project_id', pid),
-      supabase.from('profiles').select('id,full_name'),
-    ])
-    setRisks(r.data || [])
-    setMilestones(m.data || [])
-    setSuppliers(s.data || [])
-    setProfiles(p.data || [])
+    setRisks(db.risks.list({ project_id: pid }).sort((a, b) => (b.rpn || 0) - (a.rpn || 0)))
+    setMilestones(db.milestones.list({ project_id: pid }))
+    setSuppliers(db.suppliers.list({ project_id: pid }))
     setLoading(false)
   }
 
-  async function handleSave(formData) {
+  function handleSave(formData) {
     setSaving(true)
     const payload = { ...formData, project_id: currentProject.id }
     if (editRisk) {
-      const { data } = await supabase.from('risks').update(payload).eq('id', editRisk.id).select().single()
-      if (data) setRisks((prev) => prev.map((r) => r.id === data.id ? data : r).sort((a, b) => b.rpn - a.rpn))
+      const data = db.risks.update(editRisk.id, payload)
+      if (data) setRisks((prev) => prev.map((r) => r.id === data.id ? data : r).sort((a, b) => (b.rpn || 0) - (a.rpn || 0)))
     } else {
-      const { data } = await supabase.from('risks').insert(payload).select().single()
-      if (data) setRisks((prev) => [data, ...prev])
+      const data = db.risks.create(payload)
+      setRisks((prev) => [data, ...prev])
     }
     setSaving(false)
     setModalOpen(false)
@@ -292,7 +281,7 @@ export function Risks() {
                   <span className="font-mono text-xs text-dark-300">{risk.probability} × {risk.severity} × {risk.detectability}</span>
                 </Td>
                 <Td>
-                  <span className="text-sm text-dark-300">{profiles.find((p) => p.id === risk.owner_id)?.full_name || '—'}</span>
+                  <span className="text-sm text-dark-300">{risk.owner || '—'}</span>
                 </Td>
                 <Td><StatusBadge status={risk.status} /></Td>
                 <Td>
@@ -314,7 +303,6 @@ export function Risks() {
           initial={editRisk || {}}
           milestones={milestones}
           suppliers={suppliers}
-          profiles={profiles}
           onSubmit={handleSave}
           onCancel={() => { setModalOpen(false); setEditRisk(null) }}
           loading={saving}

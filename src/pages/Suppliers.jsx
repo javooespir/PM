@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Building2, TrendingDown } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -82,29 +82,24 @@ export function Suppliers() {
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
     const pid = currentProject.id
-    const [s, t, r] = await Promise.all([
-      supabase.from('suppliers').select('*').eq('project_id', pid).order('name'),
-      supabase.from('tasks').select('id,supplier_id,status').eq('project_id', pid),
-      supabase.from('risks').select('id,supplier_id,status,rpn').eq('project_id', pid),
-    ])
-    setSuppliers(s.data || [])
-    setTasks(t.data || [])
-    setRisks(r.data || [])
+    setSuppliers(db.suppliers.list({ project_id: pid }).sort((a, b) => a.name.localeCompare(b.name)))
+    setTasks(db.tasks.list({ project_id: pid }))
+    setRisks(db.risks.list({ project_id: pid }))
     setLoading(false)
   }
 
-  async function handleSave(formData) {
+  function handleSave(formData) {
     setSaving(true)
     const payload = { ...formData, project_id: currentProject.id }
     if (editSupplier) {
-      const { data } = await supabase.from('suppliers').update(payload).eq('id', editSupplier.id).select().single()
+      const data = db.suppliers.update(editSupplier.id, payload)
       if (data) setSuppliers((prev) => prev.map((s) => s.id === data.id ? data : s))
     } else {
-      const { data } = await supabase.from('suppliers').insert(payload).select().single()
-      if (data) setSuppliers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      const data = db.suppliers.create(payload)
+      setSuppliers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
     }
     setSaving(false)
     setModalOpen(false)

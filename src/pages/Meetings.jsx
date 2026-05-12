@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Users, Clock, CheckSquare } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
@@ -13,7 +13,7 @@ import { Card, CardHeader, CardTitle } from '../components/shared/Card'
 import { fmtDate } from '../utils/format'
 import clsx from 'clsx'
 
-function MeetingForm({ initial = {}, profiles = [], onSubmit, onCancel, loading }) {
+function MeetingForm({ initial = {}, onSubmit, onCancel, loading }) {
   const [form, setForm] = useState({
     title: initial.title || '',
     type: initial.type || 'weekly_review',
@@ -23,7 +23,7 @@ function MeetingForm({ initial = {}, profiles = [], onSubmit, onCancel, loading 
     notes: initial.notes || '',
     decisions: initial.decisions || '',
     status: initial.status || 'scheduled',
-    organizer_id: initial.organizer_id || '',
+    organizer: initial.organizer || '',
   })
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
@@ -52,10 +52,7 @@ function MeetingForm({ initial = {}, profiles = [], onSubmit, onCancel, loading 
       </FormRow>
       <FormRow cols={2}>
         <Input label="Location / Link" value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="Room A / Teams link" />
-        <Select label="Organizer" value={form.organizer_id} onChange={(e) => set('organizer_id', e.target.value)}>
-          <option value="">No organizer</option>
-          {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </Select>
+        <Input label="Organizer" value={form.organizer} onChange={(e) => set('organizer', e.target.value)} placeholder="Organizer name" />
       </FormRow>
       <Textarea label="Meeting Notes" value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={3} placeholder="Discussion points, context, details..." />
       <Textarea label="Decisions Made" value={form.decisions} onChange={(e) => set('decisions', e.target.value)} rows={2} placeholder="Key decisions and agreements..." />
@@ -67,8 +64,8 @@ function MeetingForm({ initial = {}, profiles = [], onSubmit, onCancel, loading 
   )
 }
 
-function ActionForm({ meetingId, projectId, profiles = [], onSubmit, onCancel, loading }) {
-  const [form, setForm] = useState({ title: '', description: '', owner_id: '', due_date: '', status: 'open' })
+function ActionForm({ meetingId, projectId, onSubmit, onCancel, loading }) {
+  const [form, setForm] = useState({ title: '', description: '', owner: '', due_date: '', status: 'open' })
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
 
   return (
@@ -76,10 +73,7 @@ function ActionForm({ meetingId, projectId, profiles = [], onSubmit, onCancel, l
       <Input label="Action Title *" value={form.title} onChange={(e) => set('title', e.target.value)} required />
       <Textarea label="Description" value={form.description} onChange={(e) => set('description', e.target.value)} rows={2} />
       <FormRow cols={2}>
-        <Select label="Owner" value={form.owner_id} onChange={(e) => set('owner_id', e.target.value)}>
-          <option value="">No owner</option>
-          {profiles.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </Select>
+        <Input label="Owner" value={form.owner} onChange={(e) => set('owner', e.target.value)} placeholder="Action owner name" />
         <Input label="Due Date" type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} />
       </FormRow>
       <div className="flex justify-end gap-2">
@@ -94,7 +88,6 @@ export function Meetings() {
   const { currentProject } = useProject()
   const [meetings, setMeetings] = useState([])
   const [actions, setActions] = useState([])
-  const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editMeeting, setEditMeeting] = useState(null)
@@ -104,46 +97,40 @@ export function Meetings() {
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
     const pid = currentProject.id
-    const [m, a, p] = await Promise.all([
-      supabase.from('meetings').select('*').eq('project_id', pid).order('scheduled_at', { ascending: false }),
-      supabase.from('meeting_actions').select('*').eq('project_id', pid).order('due_date'),
-      supabase.from('profiles').select('id,full_name'),
-    ])
-    setMeetings(m.data || [])
-    setActions(a.data || [])
-    setProfiles(p.data || [])
+    setMeetings(db.meetings.list({ project_id: pid }).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)))
+    setActions(db.meeting_actions.list({ project_id: pid }))
     setLoading(false)
   }
 
-  async function handleSaveMeeting(formData) {
+  function handleSaveMeeting(formData) {
     setSaving(true)
     const payload = { ...formData, project_id: currentProject.id }
     if (editMeeting) {
-      const { data } = await supabase.from('meetings').update(payload).eq('id', editMeeting.id).select().single()
+      const data = db.meetings.update(editMeeting.id, payload)
       if (data) setMeetings((prev) => prev.map((m) => m.id === data.id ? data : m))
     } else {
-      const { data } = await supabase.from('meetings').insert(payload).select().single()
-      if (data) setMeetings((prev) => [data, ...prev])
+      const data = db.meetings.create(payload)
+      setMeetings((prev) => [data, ...prev])
     }
     setSaving(false)
     setModalOpen(false)
     setEditMeeting(null)
   }
 
-  async function handleSaveAction(formData) {
+  function handleSaveAction(formData) {
     setSaving(true)
-    const { data } = await supabase.from('meeting_actions').insert(formData).select().single()
-    if (data) setActions((prev) => [...prev, data])
+    const data = db.meeting_actions.create(formData)
+    setActions((prev) => [...prev, data])
     setSaving(false)
     setActionModalOpen(false)
   }
 
-  async function toggleActionStatus(action) {
+  function toggleActionStatus(action) {
     const newStatus = action.status === 'completed' ? 'open' : 'completed'
-    const { data } = await supabase.from('meeting_actions').update({ status: newStatus }).eq('id', action.id).select().single()
+    const data = db.meeting_actions.update(action.id, { status: newStatus })
     if (data) setActions((prev) => prev.map((a) => a.id === data.id ? data : a))
   }
 
@@ -265,7 +252,7 @@ export function Meetings() {
               <div key={a.id} className="p-2.5 bg-dark-800/40 rounded-lg">
                 <p className="text-sm text-dark-200 font-medium">{a.title}</p>
                 <p className="text-xs text-dark-500 mt-0.5">
-                  {profiles.find((p) => p.id === a.owner_id)?.full_name || 'Unassigned'} • Due {fmtDate(a.due_date)}
+                  {a.owner || 'Unassigned'} • Due {fmtDate(a.due_date)}
                 </p>
               </div>
             ))}
@@ -276,7 +263,6 @@ export function Meetings() {
       <Modal open={modalOpen} onClose={() => { setModalOpen(false); setEditMeeting(null) }} title={editMeeting ? 'Edit Meeting' : 'New Meeting'} size="md">
         <MeetingForm
           initial={editMeeting || {}}
-          profiles={profiles}
           onSubmit={handleSaveMeeting}
           onCancel={() => { setModalOpen(false); setEditMeeting(null) }}
           loading={saving}
@@ -287,7 +273,6 @@ export function Meetings() {
         <ActionForm
           meetingId={selectedMeeting?.id}
           projectId={currentProject?.id}
-          profiles={profiles}
           onSubmit={handleSaveAction}
           onCancel={() => setActionModalOpen(false)}
           loading={saving}

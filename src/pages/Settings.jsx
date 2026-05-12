@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, Settings as SettingsIcon, Radio, Users, Layers } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { db, exportJSON, importJSON } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
 import { useAuth } from '../contexts/AuthContext'
 import { PageHeader } from '../components/shared/PageHeader'
@@ -234,10 +234,34 @@ export function Settings() {
           </Card>
 
           <Card>
+            <CardHeader><CardTitle>Data Management</CardTitle></CardHeader>
+            <div className="space-y-3">
+              <p className="text-xs text-dark-500">All data is stored in your browser (localStorage) and synced to your GitHub repo automatically.</p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={exportJSON}>Export Backup (JSON)</Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  const input = document.createElement('input')
+                  input.type = 'file'
+                  input.accept = '.json'
+                  input.onchange = (e) => {
+                    const file = e.target.files[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = (ev) => { importJSON(ev.target.result); window.location.reload() }
+                    reader.readAsText(file)
+                  }
+                  input.click()
+                }}>Import Backup</Button>
+              </div>
+            </div>
+          </Card>
+
+          <Card>
             <CardHeader><CardTitle>About</CardTitle></CardHeader>
             <div className="space-y-1 text-sm text-dark-400">
-              <p><span className="text-dark-300">Version:</span> 1.0.0</p>
-              <p><span className="text-dark-300">Stack:</span> React + Vite + TailwindCSS + Supabase</p>
+              <p><span className="text-dark-300">Version:</span> 2.0.0</p>
+              <p><span className="text-dark-300">Stack:</span> React + Vite + TailwindCSS + GitHub JSON</p>
+              <p><span className="text-dark-300">Storage:</span> localStorage + GitHub repo sync</p>
               <p><span className="text-dark-300">Designed for:</span> Automotive & Aerospace Program Management</p>
             </div>
           </Card>

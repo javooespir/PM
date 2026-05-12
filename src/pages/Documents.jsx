@@ -1,12 +1,10 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useDropzone } from 'react-dropzone'
-import { Upload, FileText, Image, File, X, ExternalLink, Tag, Filter } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { useEffect, useState } from 'react'
+import { Plus, FileText, Image, File, X, ExternalLink, Filter, Link } from 'lucide-react'
+import { db } from '../lib/db'
 import { useProject } from '../contexts/ProjectContext'
-import { useAuth } from '../contexts/AuthContext'
 import { PageHeader } from '../components/shared/PageHeader'
 import { Button } from '../components/shared/Button'
-import { Input, Select, FormRow } from '../components/shared/Input'
+import { Input, Select, Textarea, FormRow } from '../components/shared/Input'
 import { Modal } from '../components/shared/Modal'
 import { PageLoading } from '../components/shared/Loading'
 import { Badge } from '../components/shared/Badge'
@@ -17,126 +15,145 @@ const FILE_ICONS = {
   pdf: <FileText className="w-8 h-8 text-danger-400" />,
   image: <Image className="w-8 h-8 text-brand-400" />,
   excel: <FileText className="w-8 h-8 text-success-400" />,
+  link: <Link className="w-8 h-8 text-warning-400" />,
   default: <File className="w-8 h-8 text-dark-400" />,
 }
 
-function getFileIcon(name) {
-  if (!name) return FILE_ICONS.default
-  const ext = name.split('.').pop()?.toLowerCase()
-  if (['pdf'].includes(ext)) return FILE_ICONS.pdf
+function getFileIcon(doc) {
+  if (doc.url && !doc.name?.includes('.')) return FILE_ICONS.link
+  const ext = doc.name?.split('.').pop()?.toLowerCase()
+  if (ext === 'pdf') return FILE_ICONS.pdf
   if (['jpg','jpeg','png','gif','webp','svg'].includes(ext)) return FILE_ICONS.image
   if (['xls','xlsx','csv'].includes(ext)) return FILE_ICONS.excel
   return FILE_ICONS.default
 }
 
-function formatBytes(bytes) {
-  if (!bytes) return '—'
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+function DocumentForm({ initial = {}, tasks = [], risks = [], suppliers = [], milestones = [], onSubmit, onCancel, loading }) {
+  const [form, setForm] = useState({
+    name: initial.name || '',
+    description: initial.description || '',
+    url: initial.url || '',
+    doc_type: initial.doc_type || 'other',
+    task_id: initial.task_id || '',
+    risk_id: initial.risk_id || '',
+    supplier_id: initial.supplier_id || '',
+    milestone_id: initial.milestone_id || '',
+  })
+
+  function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSubmit(form) }} className="space-y-4">
+      <Input label="Document Name *" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. DFMEA Rev3.xlsx" required />
+
+      <div>
+        <label className="text-sm font-medium text-dark-300 block mb-1.5">External URL (Google Drive, OneDrive, SharePoint...)</label>
+        <div className="relative">
+          <Link className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
+          <input
+            type="url"
+            value={form.url}
+            onChange={(e) => set('url', e.target.value)}
+            placeholder="https://drive.google.com/..."
+            className="w-full bg-dark-800 border border-dark-700 text-dark-100 rounded-lg pl-9 pr-3 py-2 text-sm placeholder:text-dark-500 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50"
+          />
+        </div>
+      </div>
+
+      <FormRow cols={2}>
+        <Select label="Document Type" value={form.doc_type} onChange={(e) => set('doc_type', e.target.value)}>
+          <option value="dfmea">DFMEA</option>
+          <option value="pfmea">PFMEA</option>
+          <option value="control_plan">Control Plan</option>
+          <option value="ppap">PPAP</option>
+          <option value="drawing">Drawing</option>
+          <option value="specification">Specification</option>
+          <option value="report">Report</option>
+          <option value="other">Other</option>
+        </Select>
+        <Input label="Description" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Brief description" />
+      </FormRow>
+
+      <FormRow cols={2}>
+        <Select label="Link to Task" value={form.task_id} onChange={(e) => set('task_id', e.target.value)}>
+          <option value="">None</option>
+          {tasks.map((t) => <option key={t.id} value={t.id}>{t.title.slice(0, 30)}</option>)}
+        </Select>
+        <Select label="Link to Risk" value={form.risk_id} onChange={(e) => set('risk_id', e.target.value)}>
+          <option value="">None</option>
+          {risks.map((r) => <option key={r.id} value={r.id}>{r.title.slice(0, 30)}</option>)}
+        </Select>
+      </FormRow>
+
+      <FormRow cols={2}>
+        <Select label="Link to Supplier" value={form.supplier_id} onChange={(e) => set('supplier_id', e.target.value)}>
+          <option value="">None</option>
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </Select>
+        <Select label="Link to Milestone" value={form.milestone_id} onChange={(e) => set('milestone_id', e.target.value)}>
+          <option value="">None</option>
+          {milestones.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </Select>
+      </FormRow>
+
+      <div className="flex justify-end gap-2 pt-2">
+        <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" variant="primary" loading={loading}>{initial.id ? 'Update' : 'Add Document'}</Button>
+      </div>
+    </form>
+  )
 }
 
 export function Documents() {
   const { currentProject } = useProject()
-  const { user } = useAuth()
   const [documents, setDocuments] = useState([])
   const [tasks, setTasks] = useState([])
   const [risks, setRisks] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [milestones, setMilestones] = useState([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [uploadModalOpen, setUploadModalOpen] = useState(false)
-  const [pendingFiles, setPendingFiles] = useState([])
-  const [uploadMeta, setUploadMeta] = useState({ task_id: '', risk_id: '', supplier_id: '', milestone_id: '', description: '' })
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editDoc, setEditDoc] = useState(null)
+  const [saving, setSaving] = useState(false)
   const [filter, setFilter] = useState('')
-  const [tagFilter, setTagFilter] = useState('')
 
   useEffect(() => { if (currentProject) loadData() }, [currentProject?.id])
 
-  async function loadData() {
+  function loadData() {
     setLoading(true)
     const pid = currentProject.id
-    const [d, t, r, s, m] = await Promise.all([
-      supabase.from('documents').select('*').eq('project_id', pid).order('created_at', { ascending: false }),
-      supabase.from('tasks').select('id,title').eq('project_id', pid),
-      supabase.from('risks').select('id,title').eq('project_id', pid),
-      supabase.from('suppliers').select('id,name').eq('project_id', pid),
-      supabase.from('milestones').select('id,name').eq('project_id', pid),
-    ])
-    setDocuments(d.data || [])
-    setTasks(t.data || [])
-    setRisks(r.data || [])
-    setSuppliers(s.data || [])
-    setMilestones(m.data || [])
+    setDocuments(db.documents.list({ project_id: pid }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)))
+    setTasks(db.tasks.list({ project_id: pid }))
+    setRisks(db.risks.list({ project_id: pid }))
+    setSuppliers(db.suppliers.list({ project_id: pid }))
+    setMilestones(db.milestones.list({ project_id: pid }))
     setLoading(false)
   }
 
-  const onDrop = useCallback((files) => {
-    setPendingFiles(files)
-    setUploadModalOpen(true)
-  }, [])
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      'image/*': [],
-      'application/pdf': [],
-      'application/vnd.ms-excel': [],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [],
-      'application/msword': [],
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [],
-      'text/*': [],
-    },
-    maxSize: 50 * 1024 * 1024, // 50MB
-  })
-
-  async function handleUpload() {
-    if (!pendingFiles.length) return
-    setUploading(true)
-
-    for (const file of pendingFiles) {
-      const path = `${currentProject.id}/${Date.now()}_${file.name}`
-
-      // Upload to Supabase storage
-      const { error: uploadError } = await supabase.storage.from('documents').upload(path, file)
-      if (uploadError) { console.error(uploadError); continue }
-
-      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path)
-
-      await supabase.from('documents').insert({
-        project_id: currentProject.id,
-        name: file.name,
-        description: uploadMeta.description,
-        type: file.type,
-        size_bytes: file.size,
-        storage_path: path,
-        url: publicUrl,
-        task_id: uploadMeta.task_id || null,
-        risk_id: uploadMeta.risk_id || null,
-        supplier_id: uploadMeta.supplier_id || null,
-        milestone_id: uploadMeta.milestone_id || null,
-        uploaded_by: user?.id,
-      })
+  function handleSave(formData) {
+    setSaving(true)
+    const payload = { ...formData, project_id: currentProject.id }
+    if (editDoc) {
+      const data = db.documents.update(editDoc.id, payload)
+      if (data) setDocuments((prev) => prev.map((d) => d.id === data.id ? data : d))
+    } else {
+      const data = db.documents.create(payload)
+      setDocuments((prev) => [data, ...prev])
     }
-
-    await loadData()
-    setUploading(false)
-    setUploadModalOpen(false)
-    setPendingFiles([])
-    setUploadMeta({ task_id: '', risk_id: '', supplier_id: '', milestone_id: '', description: '' })
+    setSaving(false)
+    setModalOpen(false)
+    setEditDoc(null)
   }
 
-  async function handleDelete(doc) {
+  function handleDelete(doc) {
     if (!confirm('Delete this document?')) return
-    await supabase.storage.from('documents').remove([doc.storage_path])
-    await supabase.from('documents').delete().eq('id', doc.id)
+    db.documents.delete(doc.id)
     setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
   }
 
   const filtered = documents.filter((d) => {
-    if (filter && !d.name.toLowerCase().includes(filter.toLowerCase()) && !d.description?.toLowerCase().includes(filter.toLowerCase())) return false
-    return true
+    if (!filter) return true
+    return d.name.toLowerCase().includes(filter.toLowerCase()) || d.description?.toLowerCase().includes(filter.toLowerCase())
   })
 
   if (loading) return <PageLoading />
@@ -145,56 +162,50 @@ export function Documents() {
     <div className="animate-fade-in space-y-6">
       <PageHeader
         title="Documents"
-        subtitle={`${documents.length} files — Drag & drop to upload`}
+        subtitle={`${documents.length} documents — External links (Google Drive, OneDrive, SharePoint)`}
         actions={
-          <Button variant="primary" icon={<Upload className="w-4 h-4" />} onClick={() => setUploadModalOpen(true)}>
-            Upload Files
+          <Button variant="primary" icon={<Plus className="w-4 h-4" />} onClick={() => { setEditDoc(null); setModalOpen(true) }}>
+            Add Document
           </Button>
         }
       />
 
-      {/* Dropzone */}
-      <div
-        {...getRootProps()}
-        className={clsx(
-          'border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer',
-          isDragActive ? 'border-brand-500 bg-brand-500/5' : 'border-dark-700 hover:border-dark-600 hover:bg-dark-900/50'
-        )}
-      >
-        <input {...getInputProps()} />
-        <Upload className="w-8 h-8 mx-auto text-dark-500 mb-2" />
-        <p className="text-sm text-dark-400">
-          {isDragActive ? 'Drop files here...' : 'Drag & drop files here, or click to select'}
+      {/* Info banner */}
+      <div className="bg-brand-600/10 border border-brand-600/20 rounded-xl px-4 py-3 flex items-start gap-3">
+        <Link className="w-4 h-4 text-brand-400 shrink-0 mt-0.5" />
+        <p className="text-sm text-brand-300">
+          Documents are stored in your own cloud storage (Google Drive, OneDrive, SharePoint). Paste the sharing link here to keep track of them in one place.
         </p>
-        <p className="text-xs text-dark-600 mt-1">PDF, Images, Excel, Word — up to 50MB</p>
       </div>
 
       {/* Search */}
-      <div className="flex gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search documents..."
-            className="w-full bg-dark-800 border border-dark-700 rounded-lg pl-9 pr-3 py-1.5 text-sm text-dark-200 placeholder:text-dark-600 focus:outline-none focus:ring-1 focus:ring-brand-500/50"
-          />
-        </div>
+      <div className="relative max-w-sm">
+        <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Search documents..."
+          className="w-full bg-dark-800 border border-dark-700 rounded-lg pl-9 pr-3 py-1.5 text-sm text-dark-200 placeholder:text-dark-600 focus:outline-none focus:ring-1 focus:ring-brand-500/50"
+        />
       </div>
 
       {/* Documents grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filtered.length === 0 && (
           <div className="col-span-full text-center py-12 text-dark-500 text-sm">
-            No documents uploaded yet
+            No documents yet. Add your first document.
           </div>
         )}
         {filtered.map((doc) => (
-          <div key={doc.id} className="bg-dark-900 border border-dark-800 rounded-xl p-4 hover:border-dark-700 transition-all group">
+          <div
+            key={doc.id}
+            className="bg-dark-900 border border-dark-800 rounded-xl p-4 hover:border-dark-700 transition-all group cursor-pointer"
+            onClick={() => { setEditDoc(doc); setModalOpen(true) }}
+          >
             <div className="flex items-start justify-between gap-2 mb-3">
-              {getFileIcon(doc.name)}
+              {getFileIcon(doc)}
               <button
-                onClick={() => handleDelete(doc)}
+                onClick={(e) => { e.stopPropagation(); handleDelete(doc) }}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-dark-700 text-dark-500 hover:text-danger-400 transition-all"
               >
                 <X className="w-3.5 h-3.5" />
@@ -202,86 +213,50 @@ export function Documents() {
             </div>
 
             <p className="text-sm font-medium text-dark-100 truncate" title={doc.name}>{doc.name}</p>
-            {doc.description && <p className="text-xs text-dark-500 mt-0.5 truncate">{doc.description}</p>}
+            {doc.doc_type && <p className="text-xs text-dark-500 mt-0.5 capitalize">{doc.doc_type.replace('_', ' ')}</p>}
+            {doc.description && <p className="text-xs text-dark-600 mt-0.5 truncate">{doc.description}</p>}
 
             <div className="mt-3 pt-3 border-t border-dark-800 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-dark-600">{formatBytes(doc.size_bytes)}</p>
-                <p className="text-xs text-dark-600">{fmtDate(doc.created_at)}</p>
-              </div>
+              <p className="text-xs text-dark-600">{fmtDate(doc.created_at)}</p>
               {doc.url && (
-                <a href={doc.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
-                  className="p-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-dark-400 hover:text-white transition-colors">
+                <a
+                  href={doc.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-dark-400 hover:text-white transition-colors"
+                >
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               )}
             </div>
 
-            {/* Associations */}
             <div className="mt-2 flex flex-wrap gap-1">
-              {doc.task_id && <Badge variant="brand" className="text-xs">Task</Badge>}
-              {doc.risk_id && <Badge variant="danger" className="text-xs">Risk</Badge>}
-              {doc.supplier_id && <Badge variant="warning" className="text-xs">Supplier</Badge>}
-              {doc.milestone_id && <Badge variant="success" className="text-xs">Milestone</Badge>}
+              {doc.task_id && tasks.find((t) => t.id === doc.task_id) && <Badge variant="brand" className="text-xs">Task</Badge>}
+              {doc.risk_id && risks.find((r) => r.id === doc.risk_id) && <Badge variant="danger" className="text-xs">Risk</Badge>}
+              {doc.supplier_id && suppliers.find((s) => s.id === doc.supplier_id) && <Badge variant="warning" className="text-xs">Supplier</Badge>}
+              {doc.milestone_id && milestones.find((m) => m.id === doc.milestone_id) && <Badge variant="success" className="text-xs">Milestone</Badge>}
             </div>
           </div>
         ))}
       </div>
 
-      {/* Upload modal */}
-      <Modal open={uploadModalOpen} onClose={() => { setUploadModalOpen(false); setPendingFiles([]) }} title="Upload Documents" size="sm">
-        <div className="space-y-4">
-          {pendingFiles.length > 0 && (
-            <div className="bg-dark-800/50 rounded-lg p-3">
-              <p className="text-xs text-dark-400 font-medium mb-2">Files to upload ({pendingFiles.length})</p>
-              {pendingFiles.map((f, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm text-dark-300">
-                  {getFileIcon(f.name)}
-                  <span className="truncate">{f.name}</span>
-                  <span className="text-xs text-dark-500 shrink-0">{formatBytes(f.size)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <Input label="Description" value={uploadMeta.description}
-            onChange={(e) => setUploadMeta((m) => ({ ...m, description: e.target.value }))}
-            placeholder="Optional description..." />
-
-          <FormRow cols={2}>
-            <Select label="Link to Task" value={uploadMeta.task_id}
-              onChange={(e) => setUploadMeta((m) => ({ ...m, task_id: e.target.value }))}>
-              <option value="">None</option>
-              {tasks.map((t) => <option key={t.id} value={t.id}>{t.title.slice(0, 30)}</option>)}
-            </Select>
-            <Select label="Link to Risk" value={uploadMeta.risk_id}
-              onChange={(e) => setUploadMeta((m) => ({ ...m, risk_id: e.target.value }))}>
-              <option value="">None</option>
-              {risks.map((r) => <option key={r.id} value={r.id}>{r.title.slice(0, 30)}</option>)}
-            </Select>
-          </FormRow>
-
-          <FormRow cols={2}>
-            <Select label="Link to Supplier" value={uploadMeta.supplier_id}
-              onChange={(e) => setUploadMeta((m) => ({ ...m, supplier_id: e.target.value }))}>
-              <option value="">None</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </Select>
-            <Select label="Link to Milestone" value={uploadMeta.milestone_id}
-              onChange={(e) => setUploadMeta((m) => ({ ...m, milestone_id: e.target.value }))}>
-              <option value="">None</option>
-              {milestones.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </Select>
-          </FormRow>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => { setUploadModalOpen(false); setPendingFiles([]) }}>Cancel</Button>
-            <Button variant="primary" loading={uploading} onClick={handleUpload}
-              disabled={pendingFiles.length === 0}>
-              Upload {pendingFiles.length > 0 ? `(${pendingFiles.length})` : ''}
-            </Button>
-          </div>
-        </div>
+      <Modal
+        open={modalOpen}
+        onClose={() => { setModalOpen(false); setEditDoc(null) }}
+        title={editDoc ? 'Edit Document' : 'Add Document'}
+        size="md"
+      >
+        <DocumentForm
+          initial={editDoc || {}}
+          tasks={tasks}
+          risks={risks}
+          suppliers={suppliers}
+          milestones={milestones}
+          onSubmit={handleSave}
+          onCancel={() => { setModalOpen(false); setEditDoc(null) }}
+          loading={saving}
+        />
       </Modal>
     </div>
   )
