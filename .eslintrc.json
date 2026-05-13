@@ -1,7 +1,9 @@
 {
+  "root": true,
   "env": {
     "browser": true,
-    "es2021": true
+    "es2021": true,
+    "node": true
   },
   "extends": [
     "eslint:recommended",
@@ -24,11 +26,18 @@
     "react/react-in-jsx-scope": "off",
     "react/prop-types": "off",
     "react-refresh/only-export-components": "warn",
-    "no-unused-vars": "warn"
+    "no-unused-vars": "warn",
+    "no-undef": "warn"
   },
   "settings": {
     "react": {
       "version": "detect"
     }
-  }
+  },
+  "ignorePatterns": [
+    "node_modules/",
+    "dist/",
+    ".venv/",
+    ".env*"
+  ]
 }
